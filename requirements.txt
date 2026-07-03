@@ -1,0 +1,15 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+dependency-injector>=4.41.0
+python-dotenv>=1.0.0
+sqlalchemy[asyncio]>=2.0.0
+
+# --- Database drivers — uncomment the one that matches your DB_DRIVER setting ---
+aiomysql>=0.2.0           # mysql+aiomysql   (MySQL / MariaDB)
+# asyncpg>=0.29.0         # postgresql+asyncpg (PostgreSQL)
+# aiosqlite>=0.20.0       # sqlite+aiosqlite   (SQLite, dev/test)
+
+pytest>=8.3.0
+pytest-asyncio>=0.24.0

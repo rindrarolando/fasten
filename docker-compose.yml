@@ -1,0 +1,44 @@
+services:
+  db:
+    image: mysql:8.4
+    container_name: app_db
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      TZ: UTC
+    command:
+      - "--default-time-zone=+00:00"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_0900_ai_ci"
+    volumes:
+      - ./.data:/var/lib/mysql:rw
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # --- PostgreSQL alternative ---
+  # Uncomment the block below (and comment out the MySQL service above)
+  # to use PostgreSQL instead. Also update DB_DRIVER in .env.
+  #
+  # db:
+  #   image: postgres:16
+  #   container_name: app_db
+  #   ports:
+  #     - "5432:5432"
+  #   environment:
+  #     POSTGRES_PASSWORD: root
+  #     TZ: UTC
+  #   volumes:
+  #     - ./.data:/var/lib/postgresql/data:rw
+  #     - ./sql:/docker-entrypoint-initdb.d:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 20
+  #   restart: unless-stopped
