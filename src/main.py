@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.container import RootContainer
+from src.log import RequestLoggingMiddleware, get_logging_config, setup_logging
 
 
 @asynccontextmanager
@@ -18,6 +19,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app() -> FastAPI:
+    logging_config = get_logging_config()
+    setup_logging(level=logging_config.LOG_LEVEL)
+
     container = RootContainer()
 
     app = FastAPI(
@@ -36,6 +40,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Registered after CORS so it wraps the stack as the outermost
+    # middleware (Starlette runs the most-recently-added middleware first).
+    app.add_middleware(RequestLoggingMiddleware, settings=logging_config)
 
     from src.auth.routes import router as auth_router
     from src.admin.routes import router as admin_router

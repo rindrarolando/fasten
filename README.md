@@ -13,9 +13,10 @@ A production-ready FastAPI boilerplate. Ships with **auth** and **admin** as bui
 5. [Database setup](#database-setup)
 6. [Running the server](#running-the-server)
 7. [API overview](#api-overview)
-8. [Adding a new service](#adding-a-new-service)
-9. [Testing](#testing)
-10. [Docker](#docker)
+8. [Logging](#logging)
+9. [Adding a new service](#adding-a-new-service)
+10. [Testing](#testing)
+11. [Docker](#docker)
 
 ---
 
@@ -51,6 +52,15 @@ server/
 │   ├── async_database.py     # AsyncDatabase wrapper (engine, session factory)
 │   ├── db_types.py           # FormattedUUID SQLAlchemy type (CHAR(32), no hyphens)
 │   ├── utils.py              # PaginatedResponse, @paginate decorator, utcnow()
+│   │
+│   ├── log/                  # JSON logging: request correlation, operation spans, feature tags
+│   │   ├── config.py         # LoggingConfig (LOG_LEVEL, skip_paths, extra_headers)
+│   │   ├── setup.py          # setup_logging() — configures the root logger
+│   │   ├── formatter.py      # JsonFormatter
+│   │   ├── context.py        # request_id / bind_log_context contextvars
+│   │   ├── logger.py         # FeatureLogger, get_feature_logger
+│   │   ├── operations.py     # @operation_log, operation_logger
+│   │   └── middleware.py     # RequestLoggingMiddleware (pure ASGI)
 │   │
 │   ├── auth/                 # Built-in: shared-secret + admin credential auth
 │   │   ├── config.py         # AuthConfig (CLIENT_SHARED_SECRET, ADMIN_*)
@@ -172,6 +182,7 @@ All settings live in `.env` and are loaded by **pydantic-settings**.
 | `DB_DEFAULT_PASSWORD` | `test1234` | Default DB user password (override per service if needed) |
 | `DB_ECHO` | `false` | Log every SQL statement (dev only) |
 | `DB_CONN_ECHO` | `false` | Log connection pool events |
+| `LOG_LEVEL` | `INFO` | Root logger level for the JSON stdout logs |
 | `CLIENT_SHARED_SECRET` | — | Secret the frontend sends in `X-Client-Secret` header |
 | `ADMIN_USERNAME` | `admin` | Admin username for `X-Admin-Username` header |
 | `ADMIN_PASSWORD` | — | Admin password for `X-Admin-Password` header |
@@ -264,6 +275,38 @@ All paginated endpoints return:
 
 ---
 
+## Logging
+
+`src/log/` provides JSON-on-stdout logging, wired in automatically by `create_app()` (`setup_logging()` + `RequestLoggingMiddleware`, `src/main.py`). One JSON object per line — ready for CloudWatch, Datadog, Loki, or GCP Logging.
+
+Every request gets an `X-Request-ID` (echoed from the incoming header, or generated) that's attached to every log line for that request, plus an `X-Process-Time` response header. `/health`, `/docs`, `/redoc`, `/openapi.json` don't emit request start/complete lines (see `LoggingConfig.skip_paths`).
+
+**In a service module:**
+
+```python
+from src.log import get_feature_logger, operation_log
+
+logger = get_feature_logger(__name__, feature="auth")  # feature = bounded-context name
+
+
+class AuthService:
+    @operation_log("verify_client_secret", feature="auth")
+    def verify_client_secret(self, secret: str) -> bool:
+        ...
+```
+
+- `get_feature_logger(__name__, feature=...)` — one per service module; tags every line with `feature` so logs can be filtered per bounded context (`auth`, `admin`, `service_template`, ...).
+- `@operation_log("verb_noun", feature=...)` — put on public service methods. Logs start / complete (+ `duration_ms`) / failed (+ `error`, `error_type`, `exc_info`), sync and async both supported. Use `operation_logger(...)` as a context manager for non-method blocks (worker jobs, scripts).
+- `bind_log_context(**kwargs)` — attach extra fields (e.g. `user_id`) to every log line for the rest of the request/task; call it from an auth dependency or worker entrypoint.
+
+**Do not log** passwords, tokens, raw request/response bodies, or unmasked PII — IDs and metadata only. Use `logger.error(...)`, never `print()`.
+
+Workers/CLI entrypoints that share app code should call `setup_logging()` once at start and use the same loggers/decorator (no HTTP middleware needed outside a request).
+
+Tests live in `tests/log/`, mirroring `src/log/`.
+
+---
+
 ## Adding a new service
 
 Follow these five steps to wire up a new domain (example: `product`).
@@ -287,6 +330,7 @@ Inside `src/product/`, replace all `service_template` / `ServiceTemplate` / `exa
 - `dto.py` — rename DTOs to match your entity
 - `errors.py` — rename error classes
 - `enums/enum.py` — replace `ExampleStatus` with relevant enums
+- `service.py` — update the `feature="service_template"` values (logger + `@operation_log` calls) to your new service's name, see [Logging](#logging)
 
 ### Step 3 — Create the SQL scripts
 
@@ -369,6 +413,7 @@ The test suite covers:
 - `tests/auth/` — `AuthService` (shared-secret + admin credential validation)
 - `tests/admin/` — `AdminService`
 - `tests/common/` — `PaginatedResponse`, `@paginate` decorator, `utcnow()`
+- `tests/log/` — JSON formatter, request-id/context propagation, feature logger, `@operation_log`, `RequestLoggingMiddleware`
 
 Domain-specific tests go in `tests/<service_name>/`. Use `AsyncMock` from the standard library to stub the DAL — no database connection required.
 
