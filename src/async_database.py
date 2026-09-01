@@ -41,6 +41,9 @@ class AsyncDatabase:
             echo=self._echo,
             echo_pool=self._echo_pool,
             pool_pre_ping=True,
+            pool_size=20,           # Connections to keep in pool
+            max_overflow=10,        # Allow overflow on spikes
+            pool_recycle=3600,      # Recycle connections after 1 hour
         )
         self._session_factory = async_sessionmaker(
             self._engine,
