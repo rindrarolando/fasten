@@ -57,6 +57,17 @@ def create_app() -> FastAPI:
     async def health_check() -> dict:
         return {"status": "ok"}
 
+    # Some browsers/dev tools (e.g. an editor's embedded preview) probe "/"
+    # and "/json/version" on startup. Defining them avoids noisy 404s in the
+    # request logs; both are excluded from logging via LoggingConfig.skip_paths.
+    @app.get("/", tags=["meta"])
+    async def root() -> dict:
+        return {"name": app.title, "version": app.version, "docs": "/docs"}
+
+    @app.get("/json/version", tags=["meta"])
+    async def version() -> dict:
+        return {"name": app.title, "version": app.version}
+
     return app
 
 

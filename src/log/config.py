@@ -18,6 +18,8 @@ class LoggingConfig(BaseSettings):
     # request-id/process-time response header). Not env-driven — extend in
     # code where the app is built, e.g. LoggingConfig(skip_paths=...).
     skip_paths: tuple[str, ...] = (
+        "/",
+        "/json/version",
         "/health",
         "/healthz",
         "/ready",
