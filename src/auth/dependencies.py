@@ -21,8 +21,8 @@ async def verify_admin_credentials(
     auth_service: AuthService = Depends(Provide["auth.service"]),
 ) -> None:
     """
-    v2 stub — validates admin credentials from request headers.
-    Will be replaced by proper JWT in a future version.
+    Validates admin credentials from request headers against the DB-backed
+    admin_user table. Will be replaced by proper JWT in a future version.
     """
-    if not auth_service.verify_admin_credentials(x_admin_username, x_admin_password):
+    if not await auth_service.verify_admin_credentials(x_admin_username, x_admin_password):
         raise InvalidAdminCredentials()

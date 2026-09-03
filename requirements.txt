@@ -5,9 +5,11 @@ pydantic-settings>=2.5.0
 dependency-injector>=4.41.0
 python-dotenv>=1.0.0
 sqlalchemy[asyncio]>=2.0.0
+bcrypt>=4.0.0
 
 # --- Database drivers — uncomment the one that matches your DB_DRIVER setting ---
 aiomysql>=0.2.0           # mysql+aiomysql   (MySQL / MariaDB)
+cryptography>=42.0.0      # required by aiomysql for MySQL 8's default caching_sha2_password auth
 # asyncpg>=0.29.0         # postgresql+asyncpg (PostgreSQL)
 # aiosqlite>=0.20.0       # sqlite+aiosqlite   (SQLite, dev/test)
 

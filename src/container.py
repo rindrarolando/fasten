@@ -11,6 +11,7 @@ class RootContainer(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(
         modules=[
             "src.auth.dependencies",
+            "src.auth.routes",
             "src.admin.routes",
             # TODO: add your service routes module here, e.g.:
             # "src.my_service.routes",
@@ -19,7 +20,7 @@ class RootContainer(containers.DeclarativeContainer):
 
     db_config = providers.Singleton(get_db_config)
 
-    auth = providers.Container(AuthContainer)
+    auth = providers.Container(AuthContainer, db_config=db_config)
 
     admin = providers.Container(AdminContainer)
     # TODO: register your service container here, e.g.:

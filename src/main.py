@@ -11,11 +11,14 @@ from src.log import RequestLoggingMiddleware, get_logging_config, setup_logging
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     container: RootContainer = app.container  # type: ignore[attr-defined]
+    await container.auth.db().connect()
+    await container.auth.service().ensure_default_admin()
     # TODO: connect each service DB here, e.g.:
     # await container.my_service.db().connect()
     yield
     # TODO: disconnect each service DB here, e.g.:
     # await container.my_service.db().disconnect()
+    await container.auth.db().disconnect()
 
 
 def create_app() -> FastAPI:
@@ -45,11 +48,13 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware, settings=logging_config)
 
     from src.auth.routes import router as auth_router
+    from src.auth.routes import admin_users_router
     from src.admin.routes import router as admin_router
     # TODO: import and register your service routers here, e.g.:
     # from src.my_service.routes import router as my_service_router
 
     app.include_router(auth_router)
+    app.include_router(admin_users_router)
     app.include_router(admin_router, prefix="/api/v1")
     # TODO: app.include_router(my_service_router)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from src.auth.config import AuthConfig
@@ -18,5 +20,10 @@ def auth_config() -> AuthConfig:
 
 
 @pytest.fixture
-def auth_service(auth_config: AuthConfig) -> AuthService:
-    return AuthService(auth_config)
+def auth_dal() -> AsyncMock:
+    return AsyncMock()
+
+
+@pytest.fixture
+def auth_service(auth_config: AuthConfig, auth_dal: AsyncMock) -> AuthService:
+    return AuthService(auth_config, auth_dal)

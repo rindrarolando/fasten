@@ -30,6 +30,7 @@ A production-ready FastAPI boilerplate. Ships with **auth** and **admin** as bui
 | DI container | [dependency-injector](https://python-dependency-injector.ets-labs.org/) |
 | Settings | [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) |
 | DB driver (default) | [aiomysql](https://aiomysql.readthedocs.io/) — MySQL / MariaDB |
+| Password hashing | [bcrypt](https://pypi.org/project/bcrypt/) |
 
 Supported async drivers (swap via `DB_DRIVER` in `.env`):
 
@@ -62,14 +63,19 @@ server/
 │   │   ├── operations.py     # @operation_log, operation_logger
 │   │   └── middleware.py     # RequestLoggingMiddleware (pure ASGI)
 │   │
-│   ├── auth/                 # Built-in: shared-secret + admin credential auth
+│   ├── auth/                 # Built-in: shared-secret + DB-backed admin accounts
 │   │   ├── config.py         # AuthConfig (CLIENT_SHARED_SECRET, ADMIN_*)
-│   │   ├── container.py      # AuthContainer
+│   │   ├── container.py      # AuthContainer — owns its own AsyncDatabase (auth_db)
+│   │   ├── dal.py            # AuthDal — admin_user CRUD
 │   │   ├── dependencies.py   # verify_client_secret / verify_admin_credentials
 │   │   ├── dto.py
 │   │   ├── errors.py
-│   │   ├── routes.py         # POST /auth/admin/login (v2 stub)
-│   │   └── service.py        # AuthService
+│   │   ├── routes.py         # POST /auth/admin/login + /auth/admin/users CRUD
+│   │   ├── service.py        # AuthService (bcrypt hashing, default-admin seeding)
+│   │   ├── models/
+│   │   │   └── admin_user.py # AdminUser SQLAlchemy model
+│   │   └── enums/
+│   │       └── enum.py       # AdminUserRole (SUPERADMIN, ADMIN)
 │   │
 │   ├── admin/                # Built-in: admin orchestration layer
 │   │   ├── container.py      # AdminContainer
@@ -95,11 +101,12 @@ server/
 │           └── example_worker.py  # Sub-service template
 │
 ├── sql/
-│   ├── template.00.sql       # DB + user creation template (MySQL + PG variants)
-│   └── template.01.sql       # Table creation template (MySQL + PG variants)
+│   ├── auth.00.sql / auth.01.sql          # Built-in: auth_db + admin_user table
+│   ├── template_mysql.00/01.sql           # DB + table creation template (MySQL / MariaDB)
+│   └── template_pgsql.00/01.sql           # DB + table creation template (PostgreSQL)
 │
 ├── tests/
-│   ├── conftest.py           # auth_config, auth_service fixtures
+│   ├── conftest.py           # auth_config, auth_dal, auth_service fixtures
 │   ├── auth/
 │   │   └── test_service.py
 │   ├── admin/
@@ -184,8 +191,8 @@ All settings live in `.env` and are loaded by **pydantic-settings**.
 | `DB_CONN_ECHO` | `false` | Log connection pool events |
 | `LOG_LEVEL` | `INFO` | Root logger level for the JSON stdout logs |
 | `CLIENT_SHARED_SECRET` | — | Secret the frontend sends in `X-Client-Secret` header |
-| `ADMIN_USERNAME` | `admin` | Admin username for `X-Admin-Username` header |
-| `ADMIN_PASSWORD` | — | Admin password for `X-Admin-Password` header |
+| `ADMIN_USERNAME` | `admin` | Bootstrap admin account username, seeded into `admin_user` on first startup |
+| `ADMIN_PASSWORD` | — | Bootstrap admin account password (bcrypt-hashed before storing) |
 
 ### Database URLs
 
@@ -210,14 +217,16 @@ The `sql/` directory contains ordered SQL scripts. Docker Compose mounts the ent
 
 | File | Purpose |
 |---|---|
-| `template.00.sql` | Create database + user (template — copy and rename) |
-| `template.01.sql` | Create tables (template — copy and rename) |
+| `auth.00.sql` / `auth.01.sql` | Built-in: creates `auth_db` + the `admin_user` table |
+| `template_mysql.00/01.sql`, `template_pgsql.00/01.sql` | Templates — copy and rename for a new service |
+
+The `admin_user` table itself starts empty; `AuthService.ensure_default_admin()` seeds the bootstrap account (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) into it the first time the app starts, so no data is baked into the SQL script.
 
 When you add a new service, copy the templates:
 
 ```bash
-cp sql/template.00.sql sql/product.00.sql
-cp sql/template.01.sql sql/product.01.sql
+cp sql/template_mysql.00.sql sql/product.00.sql
+cp sql/template_mysql.01.sql sql/product.01.sql
 # Then edit both files, replacing <service_name> with "product"
 ```
 
@@ -250,14 +259,19 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 All user-facing routes require the `X-Client-Secret` header to match the `CLIENT_SHARED_SECRET` env variable. This is validated by the `verify_client_secret` FastAPI dependency.
 
-Admin routes (v2) will use `X-Admin-Username` / `X-Admin-Password` headers via `verify_admin_credentials`.
+Admin routes use `X-Admin-Username` / `X-Admin-Password` headers via `verify_admin_credentials`, checked against the DB-backed `admin_user` table (bcrypt-hashed passwords). A bootstrap account is seeded from `ADMIN_USERNAME` / `ADMIN_PASSWORD` on first startup — see [Database setup](#database-setup).
 
 ### Built-in endpoints
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/health` | None | Liveness check |
-| `POST` | `/auth/admin/login` | None | Admin login stub (v2) |
+| `POST` | `/auth/admin/login` | None | Admin login — validates credentials against `admin_user` |
+| `GET` | `/auth/admin/users` | Admin | List admin users (paginated) |
+| `POST` | `/auth/admin/users` | Admin | Create an admin user |
+| `GET` | `/auth/admin/users/{uid}` | Admin | Get one admin user |
+| `PATCH` | `/auth/admin/users/{uid}` | Admin | Update password / role / active status |
+| `DELETE` | `/auth/admin/users/{uid}` | Admin | Delete an admin user |
 | `GET` | `/api/v1/admin/health` | None | Admin service health |
 
 ### Response format for paginated lists
@@ -350,13 +364,14 @@ class RootContainer(containers.DeclarativeContainer):
     wiring_config = containers.WiringConfiguration(
         modules=[
             "src.auth.dependencies",
+            "src.auth.routes",
             "src.admin.routes",
             "src.product.routes",       # add this
         ]
     )
 
     db_config = providers.Singleton(get_db_config)
-    auth = providers.Container(AuthContainer)
+    auth = providers.Container(AuthContainer, db_config=db_config)
     admin = providers.Container(AdminContainer)
 
     product = providers.Container(               # add this
@@ -410,7 +425,7 @@ pytest tests/auth/
 ```
 
 The test suite covers:
-- `tests/auth/` — `AuthService` (shared-secret + admin credential validation)
+- `tests/auth/` — `AuthService` (shared-secret + DB-backed admin credential validation, default-admin seeding), with `AuthDal` stubbed via `AsyncMock`
 - `tests/admin/` — `AdminService`
 - `tests/common/` — `PaginatedResponse`, `@paginate` decorator, `utcnow()`
 - `tests/log/` — JSON formatter, request-id/context propagation, feature logger, `@operation_log`, `RequestLoggingMiddleware`
