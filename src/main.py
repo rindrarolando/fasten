@@ -1,77 +1,62 @@
 from contextlib import asynccontextmanager
-from collections.abc import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.config import get_settings
 from src.container import RootContainer
 from src.log import RequestLoggingMiddleware, get_logging_config, setup_logging
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    container: RootContainer = app.container  # type: ignore[attr-defined]
-    await container.auth.db().connect()
-    await container.auth.service().ensure_default_admin()
-    # TODO: connect each service DB here, e.g.:
-    # await container.my_service.db().connect()
-    yield
-    # TODO: disconnect each service DB here, e.g.:
-    # await container.my_service.db().disconnect()
-    await container.auth.db().disconnect()
+async def lifespan(app: FastAPI):
+    container = app.container
+    # Fail closed on missing OIDC configuration, without making provider network calls.
+    container.auth.config()
+    db = container.db()
+    try:
+        await db.check()
+        yield
+    finally:
+        await db.disconnect()
 
 
 def create_app() -> FastAPI:
-    logging_config = get_logging_config()
-    setup_logging(level=logging_config.LOG_LEVEL)
-
+    settings = get_settings()
+    logging = get_logging_config()
+    setup_logging(level=logging.LOG_LEVEL)
     container = RootContainer()
-
-    app = FastAPI(
-        title="API Template",
-        description="FastAPI boilerplate with auth, admin, and pluggable services.",
-        version="0.1.0",
-        lifespan=lifespan,
-    )
-
-    app.container = container  # type: ignore[attr-defined]
-
+    app = FastAPI(title=settings.PROJECT_NAME, version="0.2.0", lifespan=lifespan)
+    app.container = container
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
-    # Registered after CORS so it wraps the stack as the outermost
-    # middleware (Starlette runs the most-recently-added middleware first).
-    app.add_middleware(RequestLoggingMiddleware, settings=logging_config)
-
-    from src.auth.routes import router as auth_router
-    from src.auth.routes import admin_users_router
+    app.add_middleware(RequestLoggingMiddleware, settings=logging)
     from src.admin.routes import router as admin_router
-    # TODO: import and register your service routers here, e.g.:
-    # from src.my_service.routes import router as my_service_router
+    from src.auth.routes import router as auth_router
 
-    app.include_router(auth_router)
-    app.include_router(admin_users_router)
-    app.include_router(admin_router, prefix="/api/v1")
-    # TODO: app.include_router(my_service_router)
+    app.include_router(auth_router, prefix=settings.API_V1_STR)
+    app.include_router(admin_router, prefix=settings.API_V1_STR)
 
     @app.get("/health", tags=["health"])
-    async def health_check() -> dict:
+    async def health():
         return {"status": "ok"}
 
-    # Some browsers/dev tools (e.g. an editor's embedded preview) probe "/"
-    # and "/json/version" on startup. Defining them avoids noisy 404s in the
-    # request logs; both are excluded from logging via LoggingConfig.skip_paths.
-    @app.get("/", tags=["meta"])
-    async def root() -> dict:
-        return {"name": app.title, "version": app.version, "docs": "/docs"}
+    @app.get("/ready", tags=["health"])
+    async def ready():
+        try:
+            await container.db().check()
+        except Exception:
+            raise HTTPException(503, "Database unavailable") from None
+        return {"status": "ok"}
 
-    @app.get("/json/version", tags=["meta"])
-    async def version() -> dict:
-        return {"name": app.title, "version": app.version}
+    @app.get("/", tags=["meta"])
+    async def root():
+        return {"name": app.title, "version": app.version, "docs": "/docs"}
 
     return app
 

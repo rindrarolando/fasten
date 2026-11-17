@@ -1,44 +1,37 @@
 services:
   db:
-    image: mysql:8.4
-    container_name: app_db
-    ports:
-      - "3306:3306"
+    image: postgres:17
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      TZ: UTC
-    command:
-      - "--default-time-zone=+00:00"
-      - "--character-set-server=utf8mb4"
-      - "--collation-server=utf8mb4_0900_ai_ci"
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
-      - ./.data:/var/lib/mysql:rw
-      - ./sql:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
-
-  # --- PostgreSQL alternative ---
-  # Uncomment the block below (and comment out the MySQL service above)
-  # to use PostgreSQL instead. Also update DB_DRIVER in .env.
-  #
-  # db:
-  #   image: postgres:16
-  #   container_name: app_db
-  #   ports:
-  #     - "5432:5432"
-  #   environment:
-  #     POSTGRES_PASSWORD: root
-  #     TZ: UTC
-  #   volumes:
-  #     - ./.data:/var/lib/postgresql/data:rw
-  #     - ./sql:/docker-entrypoint-initdb.d:ro
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 20
-  #   restart: unless-stopped
+      timeout: 5s
+      retries: 10
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_HOST_OVERRIDE: db
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_HOST_OVERRIDE: db
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+volumes:
+  postgres_data:

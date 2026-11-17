@@ -1,22 +1,22 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends, Query
 
-from src.auth.dependencies import verify_client_secret
-from src.utils import PaginatedResponse
+from src.auth.dependencies import get_current_user
 from src.service_template.dto import (
     ExampleModelCreate,
-    ExampleModelUpdate,
     ExampleModelRead,
+    ExampleModelUpdate,
 )
 from src.service_template.service import ServiceLayer
+from src.utils import PaginatedResponse
 
 # TODO: update the prefix to match your service, e.g. /api/v1.
 router = APIRouter(
     prefix="/api/v1",
     tags=["service_template"],
-    dependencies=[Depends(verify_client_secret)],
+    dependencies=[Depends(get_current_user)],
 )
 
 

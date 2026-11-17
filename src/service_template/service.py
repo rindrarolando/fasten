@@ -1,15 +1,15 @@
 import uuid
 
-from src.utils import PaginatedResponse, paginate
 from src.log import get_feature_logger, operation_log
 from src.service_template.dal import ServiceDal
 from src.service_template.dto import (
     ExampleModelCreate,
-    ExampleModelUpdate,
     ExampleModelRead,
+    ExampleModelUpdate,
 )
 from src.service_template.errors import ExampleModelNotFound
 from src.service_template.services.example_worker import ExampleWorker
+from src.utils import paginate
 
 # TODO: rename "service_template" to your bounded-context name, e.g. "orders".
 logger = get_feature_logger(__name__, feature="service_template")
@@ -47,7 +47,9 @@ class ServiceLayer:
         return ExampleModelRead.model_validate(obj)
 
     @operation_log("update_example", feature="service_template")
-    async def update(self, uid: uuid.UUID, body: ExampleModelUpdate) -> ExampleModelRead:
+    async def update(
+        self, uid: uuid.UUID, body: ExampleModelUpdate
+    ) -> ExampleModelRead:
         obj = await self._dal.get_by_uid(uid)
         if obj is None:
             raise ExampleModelNotFound(str(uid))

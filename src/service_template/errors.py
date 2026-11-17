@@ -1,6 +1,5 @@
 from fastapi import HTTPException, status
 
-
 # TODO: rename and add error classes for each domain entity.
 
 

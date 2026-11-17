@@ -13,16 +13,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         modules=["src.service_template.routes"]
     )
 
-    db_config = providers.Dependency()
-
-    db = providers.Singleton(
-        AsyncDatabase,
-        # TODO: replace "service_template" with your service name so the URL
-        #       resolves to <service_name>_db / <service_name>_user.
-        url=db_config.provided.db_url.call("service_template"),
-        echo=db_config.provided.DB_ECHO,
-        echo_pool=db_config.provided.DB_CONN_ECHO,
-    )
+    # Inject RootContainer.db; domains never own engines or database credentials.
+    db = providers.Dependency(instance_of=AsyncDatabase)
 
     dal = providers.Factory(ServiceDal, db=db)
 

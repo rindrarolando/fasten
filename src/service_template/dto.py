@@ -4,7 +4,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 # TODO: replace ExampleModel* with your domain entity name, e.g. ProductCreate.
 
 
