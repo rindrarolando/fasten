@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import delete, func, select, update
 
 from src.async_database import AsyncDatabase
 from src.service_template.models.example import ExampleModel
@@ -55,7 +55,5 @@ class ServiceDal:
 
     async def delete(self, obj_id: int) -> None:
         async with self._db.session() as session:
-            await session.execute(
-                delete(ExampleModel).where(ExampleModel.id == obj_id)
-            )
+            await session.execute(delete(ExampleModel).where(ExampleModel.id == obj_id))
             await session.commit()

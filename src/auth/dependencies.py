@@ -1,28 +1,36 @@
-from fastapi import Depends, Header
-from dependency_injector.wiring import Provide, inject
+from typing import Annotated
 
-from src.auth.errors import InvalidClientSecret, InvalidAdminCredentials
+from dependency_injector.wiring import Provide, inject
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from src.auth.dto import Principal
 from src.auth.service import AuthService
 
-
-@inject
-async def verify_client_secret(
-    x_client_secret: str = Header(alias="X-Client-Secret", default=""),
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> None:
-    if not auth_service.verify_client_secret(x_client_secret):
-        raise InvalidClientSecret()
+bearer = HTTPBearer(auto_error=False, description="JWT access token")
 
 
 @inject
-async def verify_admin_credentials(
-    x_admin_username: str = Header(alias="X-Admin-Username", default=""),
-    x_admin_password: str = Header(alias="X-Admin-Password", default=""),
+async def get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> None:
-    """
-    Validates admin credentials from request headers against the DB-backed
-    admin_user table. Will be replaced by proper JWT in a future version.
-    """
-    if not await auth_service.verify_admin_credentials(x_admin_username, x_admin_password):
-        raise InvalidAdminCredentials()
+) -> Principal:
+    if credentials is None:
+        raise HTTPException(
+            401, "Bearer token required", headers={"WWW-Authenticate": "Bearer"}
+        )
+    return await auth_service.authenticate(credentials.credentials)
+
+
+CurrentUser = Annotated[Principal, Depends(get_current_user)]
+
+
+def require_roles(*roles: str):
+    """Require at least one exact, provider-assigned role; no implicit hierarchy."""
+
+    async def check(user: CurrentUser) -> Principal:
+        if not set(roles).intersection(user.roles):
+            raise HTTPException(403, "Insufficient permissions")
+        return user
+
+    return check

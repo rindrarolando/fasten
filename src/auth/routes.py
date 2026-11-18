@@ -1,89 +1,32 @@
-import uuid
-
-from fastapi import APIRouter, Depends, Query
 from dependency_injector.wiring import Provide, inject
+from fastapi import APIRouter, Depends, HTTPException
 
-from src.auth.dependencies import verify_admin_credentials
-from src.auth.dto import (
-    AdminLoginRequest,
-    AdminLoginResponse,
-    AdminUserCreate,
-    AdminUserRead,
-    AdminUserUpdate,
-)
-from src.auth.errors import InvalidAdminCredentials
-from src.auth.service import AuthService
-from src.utils import PaginatedResponse
+from src.auth.dependencies import CurrentUser
+from src.auth.dto import Credentials, Principal, RegisterRequest, TokenResponse
+from src.auth.local import LocalAuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post(
-    "/admin/login",
-    response_model=AdminLoginResponse,
-    summary="Admin login",
-)
+@router.get("/me", response_model=Principal)
+async def me(user: CurrentUser) -> Principal:
+    return user
+
+
+@router.post("/login", response_model=TokenResponse)
 @inject
-async def admin_login(
-    body: AdminLoginRequest,
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> AdminLoginResponse:
-    if not await auth_service.verify_admin_credentials(body.username, body.password):
-        raise InvalidAdminCredentials()
-    return AdminLoginResponse(message="Login successful.")
+async def login(body: Credentials, service=Depends(Provide["auth.service"])):
+    if not isinstance(service, LocalAuthService):
+        raise HTTPException(404, "Local authentication disabled")
+    return await service.login(body)
 
 
-# Admin-user management. Protected by verify_admin_credentials
-# (X-Admin-Username / X-Admin-Password headers).
-admin_users_router = APIRouter(
-    prefix="/auth/admin/users",
-    tags=["auth"],
-    dependencies=[Depends(verify_admin_credentials)],
-)
-
-
-@admin_users_router.get("", response_model=PaginatedResponse[AdminUserRead])
+@router.post("/register", response_model=Principal, status_code=201)
 @inject
-async def list_admin_users(
-    page: int = Query(default=1, ge=1),
-    size: int = Query(default=10, ge=1, le=100),
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> PaginatedResponse[AdminUserRead]:
-    return await auth_service.list_admin_users(page=page, size=size)
-
-
-@admin_users_router.post("", response_model=AdminUserRead, status_code=201)
-@inject
-async def create_admin_user(
-    body: AdminUserCreate,
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> AdminUserRead:
-    return await auth_service.create_admin_user(body)
-
-
-@admin_users_router.get("/{uid}", response_model=AdminUserRead)
-@inject
-async def get_admin_user(
-    uid: uuid.UUID,
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> AdminUserRead:
-    return await auth_service.get_admin_user(uid)
-
-
-@admin_users_router.patch("/{uid}", response_model=AdminUserRead)
-@inject
-async def update_admin_user(
-    uid: uuid.UUID,
-    body: AdminUserUpdate,
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> AdminUserRead:
-    return await auth_service.update_admin_user(uid, body)
-
-
-@admin_users_router.delete("/{uid}", status_code=204)
-@inject
-async def delete_admin_user(
-    uid: uuid.UUID,
-    auth_service: AuthService = Depends(Provide["auth.service"]),
-) -> None:
-    await auth_service.delete_admin_user(uid)
+async def register(body: RegisterRequest, service=Depends(Provide["auth.service"])):
+    if (
+        not isinstance(service, LocalAuthService)
+        or not service.config.AUTH_ALLOW_REGISTRATION
+    ):
+        raise HTTPException(404, "Registration disabled")
+    return await service.create_user(body)

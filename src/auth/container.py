@@ -1,30 +1,18 @@
 from dependency_injector import containers, providers
 
-from src.async_database import AsyncDatabase
-from src.auth.config import get_auth_config
-from src.auth.dal import AuthDal
+from src.auth.config import AuthConfig
+from src.auth.dal import UserDal
+from src.auth.local import LocalAuthService
 from src.auth.service import AuthService
 
 
+def build_service(config, db):
+    if config.AUTH_MODE == "oidc":
+        return AuthService(config)
+    return LocalAuthService(config, UserDal(db))
+
+
 class AuthContainer(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(
-        modules=["src.auth.dependencies", "src.auth.routes"]
-    )
-
-    config = providers.Singleton(get_auth_config)
-    db_config = providers.Dependency()
-
-    db = providers.Singleton(
-        AsyncDatabase,
-        url=db_config.provided.db_url.call("auth"),
-        echo=db_config.provided.DB_ECHO,
-        echo_pool=db_config.provided.DB_CONN_ECHO,
-    )
-
-    dal = providers.Factory(AuthDal, db=db)
-
-    service = providers.Singleton(
-        AuthService,
-        config=config,
-        dal=dal,
-    )
+    db = providers.Dependency()
+    config = providers.Singleton(AuthConfig)
+    service = providers.Singleton(build_service, config=config, db=db)

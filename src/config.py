@@ -1,55 +1,46 @@
 from functools import lru_cache
 
+from pydantic import PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL, make_url
 
 
-class DBConfig(BaseSettings):
-    """
-    Base database configuration shared across all services.
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    Convention:
-      - db name    : <service_name>_db
-      - db user    : <service_name>_user
-      - db password: shared default (overridable per service)
-      - host/port  : shared, single DB instance
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-    # Async SQLAlchemy driver string — swap to match your database:
-    #   mysql+aiomysql       (MySQL / MariaDB)
-    #   postgresql+asyncpg   (PostgreSQL)
-    #   sqlite+aiosqlite     (SQLite, dev/test only)
-    DB_DRIVER: str = "mysql+aiomysql"
-
-    DB_HOST: str = "0.0.0.0"
-    DB_PORT: int = 3306
-
-    DB_DEFAULT_PASSWORD: str = "test1234"
-
+    PROJECT_NAME: str = "Fasten API"
+    API_V1_STR: str = "/api/v1"
+    DATABASE_URL: PostgresDsn
+    BACKEND_CORS_ORIGINS: list[str] = []
     DB_ECHO: bool = False
-    DB_CONN_ECHO: bool = False
+    DATABASE_HOST_OVERRIDE: str | None = None
 
-    def db_url(self, service_name: str, password: str | None = None) -> str:
-        """
-        Build an async DB URL for the given service.
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def async_postgres(cls, value):
+        url = make_url(str(value))
+        if url.drivername not in {"postgres", "postgresql", "postgresql+asyncpg"}:
+            raise ValueError("DATABASE_URL must use PostgreSQL with asyncpg")
+        return url.set(drivername="postgresql+asyncpg").render_as_string(
+            hide_password=False
+        )
 
-        service_name examples: "auth", "product"
-          -> product: mysql+aiomysql://product_user:test1234@0.0.0.0:3306/product_db
-        """
-        db_name = f"{service_name}_db"
-        db_user = f"{service_name}_user"
-        db_password = password or self.DB_DEFAULT_PASSWORD
+    @field_validator("BACKEND_CORS_ORIGINS")
+    @classmethod
+    def explicit_origins(cls, value):
+        if "*" in value:
+            raise ValueError("Use explicit CORS origins")
+        return value
+
+    @property
+    def database_url(self) -> URL:
         return (
-            f"{self.DB_DRIVER}://{db_user}:{db_password}"
-            f"@{self.DB_HOST}:{self.DB_PORT}/{db_name}"
+            make_url(str(self.DATABASE_URL)).set(host=self.DATABASE_HOST_OVERRIDE)
+            if self.DATABASE_HOST_OVERRIDE
+            else make_url(str(self.DATABASE_URL))
         )
 
 
 @lru_cache
-def get_db_config() -> DBConfig:
-    return DBConfig()
+def get_settings() -> Settings:
+    return Settings()

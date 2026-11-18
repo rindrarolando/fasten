@@ -1,11 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from src.admin.dto import MessageResponse
+from src.auth.dependencies import require_roles
 
-router = APIRouter(prefix="/admin", tags=["admin"])
-
-# Admin routes are protected by verify_admin_credentials (v2).
-# Stubs are provided here as placeholders for future implementation.
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_roles("ADMIN", "SUPERADMIN"))],
+)
 
 
 @router.get(

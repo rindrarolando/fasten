@@ -1,39 +1,41 @@
-import uuid
-from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
-
-from src.auth.enums.enum import AdminUserRole
+from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
 
 
-class AdminLoginRequest(BaseModel):
-    username: str
-    password: str
+class Principal(BaseModel):
+    subject: str
+    issuer: str
+    roles: list[str]
 
 
-class AdminLoginResponse(BaseModel):
-    message: str
+class Credentials(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: EmailStr
+    password: SecretStr
+
+    @field_validator("password")
+    @classmethod
+    def bounded_password(cls, value):
+        if not 1 <= len(value.get_secret_value()) <= 128:
+            raise ValueError("Password must contain 1 to 128 characters")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value):
+        return str(value).lower()
 
 
-class AdminUserCreate(BaseModel):
-    username: str
-    password: str
-    role: AdminUserRole = AdminUserRole.ADMIN
+class RegisterRequest(Credentials):
+    @field_validator("password")
+    @classmethod
+    def password_policy(cls, value):
+        if not 12 <= len(value.get_secret_value()) <= 128:
+            raise ValueError("Password must contain 12 to 128 characters")
+        return value
 
 
-class AdminUserUpdate(BaseModel):
-    password: str | None = None
-    role: AdminUserRole | None = None
-    is_active: bool | None = None
-
-
-class AdminUserRead(BaseModel):
-    id: int
-    uid: uuid.UUID
-    username: str
-    role: AdminUserRole
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"

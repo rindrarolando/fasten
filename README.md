@@ -1,461 +1,143 @@
-# FastAPI Backend Template
+# Fasten
 
-A production-ready FastAPI boilerplate. Ships with **auth** and **admin** as built-in services and a **`service_template/`** folder you copy-paste to add any new domain (product, order, user, etc.).
+Async FastAPI backend with one PostgreSQL database, Alembic migrations, built-in email/password login, JWT access tokens and role-based authorization (with optional OIDC). Inspired by the [FastAPI full-stack template](https://github.com/fastapi/full-stack-fastapi-template), retaining this project's async SQLAlchemy and dependency-injector service layers.
 
----
+## Requirements and setup
 
-## Table of contents
+- Python 3.12+, PostgreSQL 17 (or Docker Compose)
+- No external identity provider is needed for the default email/password mode.
 
-1. [Tech stack](#tech-stack)
-2. [Project structure](#project-structure)
-3. [Quick start](#quick-start)
-4. [Configuration](#configuration)
-5. [Database setup](#database-setup)
-6. [Running the server](#running-the-server)
-7. [API overview](#api-overview)
-8. [Logging](#logging)
-9. [Adding a new service](#adding-a-new-service)
-10. [Testing](#testing)
-11. [Docker](#docker)
-
----
-
-## Tech stack
-
-| Layer | Library |
-|---|---|
-| Web framework | [FastAPI](https://fastapi.tiangolo.com/) |
-| ASGI server | [Uvicorn](https://www.uvicorn.org/) |
-| ORM | [SQLAlchemy 2 (async)](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) |
-| DI container | [dependency-injector](https://python-dependency-injector.ets-labs.org/) |
-| Settings | [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) |
-| DB driver (default) | [aiomysql](https://aiomysql.readthedocs.io/) — MySQL / MariaDB |
-| Password hashing | [bcrypt](https://pypi.org/project/bcrypt/) |
-
-Supported async drivers (swap via `DB_DRIVER` in `.env`):
-
-| Database | Driver | Install |
-|---|---|---|
-| MySQL / MariaDB | `mysql+aiomysql` | `aiomysql` (default, already in requirements) |
-| PostgreSQL | `postgresql+asyncpg` | uncomment `asyncpg` in `requirements.txt` |
-| SQLite (dev/test) | `sqlite+aiosqlite` | uncomment `aiosqlite` in `requirements.txt` |
-
----
-
-## Project structure
-
-```
-server/
-├── src/
-│   ├── main.py               # FastAPI app factory + CORS + lifespan
-│   ├── container.py          # Root DI container — wires all service containers
-│   ├── config.py             # DBConfig: shared DB settings + db_url() builder
-│   ├── async_database.py     # AsyncDatabase wrapper (engine, session factory)
-│   ├── db_types.py           # FormattedUUID SQLAlchemy type (CHAR(32), no hyphens)
-│   ├── utils.py              # PaginatedResponse, @paginate decorator, utcnow()
-│   │
-│   ├── log/                  # JSON logging: request correlation, operation spans, feature tags
-│   │   ├── config.py         # LoggingConfig (LOG_LEVEL, skip_paths, extra_headers)
-│   │   ├── setup.py          # setup_logging() — configures the root logger
-│   │   ├── formatter.py      # JsonFormatter
-│   │   ├── context.py        # request_id / bind_log_context contextvars
-│   │   ├── logger.py         # FeatureLogger, get_feature_logger
-│   │   ├── operations.py     # @operation_log, operation_logger
-│   │   └── middleware.py     # RequestLoggingMiddleware (pure ASGI)
-│   │
-│   ├── auth/                 # Built-in: shared-secret + DB-backed admin accounts
-│   │   ├── config.py         # AuthConfig (CLIENT_SHARED_SECRET, ADMIN_*)
-│   │   ├── container.py      # AuthContainer — owns its own AsyncDatabase (auth_db)
-│   │   ├── dal.py            # AuthDal — admin_user CRUD
-│   │   ├── dependencies.py   # verify_client_secret / verify_admin_credentials
-│   │   ├── dto.py
-│   │   ├── errors.py
-│   │   ├── routes.py         # POST /auth/admin/login + /auth/admin/users CRUD
-│   │   ├── service.py        # AuthService (bcrypt hashing, default-admin seeding)
-│   │   ├── models/
-│   │   │   └── admin_user.py # AdminUser SQLAlchemy model
-│   │   └── enums/
-│   │       └── enum.py       # AdminUserRole (SUPERADMIN, ADMIN)
-│   │
-│   ├── admin/                # Built-in: admin orchestration layer
-│   │   ├── container.py      # AdminContainer
-│   │   ├── dto.py
-│   │   ├── errors.py
-│   │   ├── routes.py         # GET /api/v1/admin/health
-│   │   └── service.py        # AdminService (delegates to domain services)
-│   │
-│   └── service_template/     # Copy-paste skeleton for any new service
-│       ├── __init__.py
-│       ├── config.py
-│       ├── container.py
-│       ├── dal.py            # Data Access Layer
-│       ├── dto.py            # Pydantic DTOs
-│       ├── errors.py         # HTTPException subclasses
-│       ├── service.py        # Business logic
-│       ├── routes.py         # FastAPI router stubs
-│       ├── models/
-│       │   └── example.py    # SQLAlchemy model template
-│       ├── enums/
-│       │   └── enum.py
-│       └── services/
-│           └── example_worker.py  # Sub-service template
-│
-├── sql/
-│   ├── auth.00.sql / auth.01.sql          # Built-in: auth_db + admin_user table
-│   ├── template_mysql.00/01.sql           # DB + table creation template (MySQL / MariaDB)
-│   └── template_pgsql.00/01.sql           # DB + table creation template (PostgreSQL)
-│
-├── tests/
-│   ├── conftest.py           # auth_config, auth_dal, auth_service fixtures
-│   ├── auth/
-│   │   └── test_service.py
-│   ├── admin/
-│   │   └── test_service.py
-│   └── common/
-│       └── test_utils.py
-│
-├── .env.example
-├── .env                      # gitignored — copy from .env.example
-├── Dockerfile
-├── docker-compose.yml        # MySQL by default; PostgreSQL alternative included
-├── requirements.txt
-└── pytest.ini
-```
-
----
-
-## Quick start
-
-### Prerequisites
-
-- Python 3.12+
-- Docker + Docker Compose (for the database)
-
-### 1. Clone and create the virtual environment
-
-```bash
+```sh
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Configure the environment
-
-```bash
+source .venv/bin/activate
+pip install -r requirements.lock
 cp .env.example .env
 ```
 
-Edit `.env` — the minimum required values:
+Edit `.env`: choose a strong PostgreSQL password, update `DATABASE_URL` to match, and set `JWT_SECRET_KEY` to a random value generated with `openssl rand -hex 32`. Percent-encode special characters in the URL password (`@` becomes `%40`). PostgreSQL's `POSTGRES_PASSWORD` remains the raw password. `DATABASE_URL` is required; there are no built-in database or administrator credentials.
 
-```dotenv
-DB_DRIVER=mysql+aiomysql     # or postgresql+asyncpg / sqlite+aiosqlite
-DB_HOST=0.0.0.0
-DB_PORT=3306
-DB_DEFAULT_PASSWORD=your_password
+For a host-run API:
 
-CLIENT_SHARED_SECRET=change_me_in_production
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your_password
-```
-
-### 3. Start the database
-
-```bash
-docker compose up -d
-```
-
-This starts MySQL (or PostgreSQL if you switched the service in `docker-compose.yml`) and automatically runs every `sql/*.sql` file to initialise the database.
-
-### 4. Start the API
-
-```bash
+```sh
+docker compose up -d db
+alembic upgrade head
 uvicorn src.main:app --reload
 ```
 
-The API is now available at `http://localhost:8000`.  
-Interactive docs: `http://localhost:8000/docs`
+For the container stack:
 
----
-
-## Configuration
-
-All settings live in `.env` and are loaded by **pydantic-settings**.
-
-| Variable | Default | Description |
-|---|---|---|
-| `DB_DRIVER` | `mysql+aiomysql` | SQLAlchemy async driver string |
-| `DB_HOST` | `0.0.0.0` | Database host |
-| `DB_PORT` | `3306` | Database port |
-| `DB_DEFAULT_PASSWORD` | `test1234` | Default DB user password (override per service if needed) |
-| `DB_ECHO` | `false` | Log every SQL statement (dev only) |
-| `DB_CONN_ECHO` | `false` | Log connection pool events |
-| `LOG_LEVEL` | `INFO` | Root logger level for the JSON stdout logs |
-| `CLIENT_SHARED_SECRET` | — | Secret the frontend sends in `X-Client-Secret` header |
-| `ADMIN_USERNAME` | `admin` | Bootstrap admin account username, seeded into `admin_user` on first startup |
-| `ADMIN_PASSWORD` | — | Bootstrap admin account password (bcrypt-hashed before storing) |
-
-### Database URLs
-
-`DBConfig.db_url(service_name)` builds the connection URL automatically:
-
-```
-<DB_DRIVER>://<service_name>_user:<DB_DEFAULT_PASSWORD>@<DB_HOST>:<DB_PORT>/<service_name>_db
-```
-
-Example — a `product` service with `DB_DRIVER=postgresql+asyncpg`:
-```
-postgresql+asyncpg://product_user:your_password@0.0.0.0:5432/product_db
-```
-
----
-
-## Database setup
-
-The `sql/` directory contains ordered SQL scripts. Docker Compose mounts the entire directory into the DB container's init folder, so all scripts run on first startup (alphabetical order).
-
-**File naming convention:** `<service_name>.<order>.sql`
-
-| File | Purpose |
-|---|---|
-| `auth.00.sql` / `auth.01.sql` | Built-in: creates `auth_db` + the `admin_user` table |
-| `template_mysql.00/01.sql`, `template_pgsql.00/01.sql` | Templates — copy and rename for a new service |
-
-The `admin_user` table itself starts empty; `AuthService.ensure_default_admin()` seeds the bootstrap account (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) into it the first time the app starts, so no data is baked into the SQL script.
-
-When you add a new service, copy the templates:
-
-```bash
-cp sql/template_mysql.00.sql sql/product.00.sql
-cp sql/template_mysql.01.sql sql/product.01.sql
-# Then edit both files, replacing <service_name> with "product"
-```
-
-> **Resetting the database:** stop the containers, delete the `.data/` directory, then restart.
-> ```bash
-> docker compose down
-> rm -rf .data/
-> docker compose up -d
-> ```
-
----
-
-## Running the server
-
-**Development (with auto-reload):**
-```bash
-uvicorn src.main:app --reload
-```
-
-**Production:**
-```bash
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
----
-
-## API overview
-
-### Authentication
-
-All user-facing routes require the `X-Client-Secret` header to match the `CLIENT_SHARED_SECRET` env variable. This is validated by the `verify_client_secret` FastAPI dependency.
-
-Admin routes use `X-Admin-Username` / `X-Admin-Password` headers via `verify_admin_credentials`, checked against the DB-backed `admin_user` table (bcrypt-hashed passwords). A bootstrap account is seeded from `ADMIN_USERNAME` / `ADMIN_PASSWORD` on first startup — see [Database setup](#database-setup).
-
-### Built-in endpoints
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/health` | None | Liveness check |
-| `POST` | `/auth/admin/login` | None | Admin login — validates credentials against `admin_user` |
-| `GET` | `/auth/admin/users` | Admin | List admin users (paginated) |
-| `POST` | `/auth/admin/users` | Admin | Create an admin user |
-| `GET` | `/auth/admin/users/{uid}` | Admin | Get one admin user |
-| `PATCH` | `/auth/admin/users/{uid}` | Admin | Update password / role / active status |
-| `DELETE` | `/auth/admin/users/{uid}` | Admin | Delete an admin user |
-| `GET` | `/api/v1/admin/health` | None | Admin service health |
-
-### Response format for paginated lists
-
-All paginated endpoints return:
-
-```json
-{
-  "items": [...],
-  "total": 42,
-  "page": 1,
-  "size": 10
-}
-```
-
----
-
-## Logging
-
-`src/log/` provides JSON-on-stdout logging, wired in automatically by `create_app()` (`setup_logging()` + `RequestLoggingMiddleware`, `src/main.py`). One JSON object per line — ready for CloudWatch, Datadog, Loki, or GCP Logging.
-
-Every request gets an `X-Request-ID` (echoed from the incoming header, or generated) that's attached to every log line for that request, plus an `X-Process-Time` response header. `/health`, `/docs`, `/redoc`, `/openapi.json` don't emit request start/complete lines (see `LoggingConfig.skip_paths`).
-
-**In a service module:**
-
-```python
-from src.log import get_feature_logger, operation_log
-
-logger = get_feature_logger(__name__, feature="auth")  # feature = bounded-context name
-
-
-class AuthService:
-    @operation_log("verify_client_secret", feature="auth")
-    def verify_client_secret(self, secret: str) -> bool:
-        ...
-```
-
-- `get_feature_logger(__name__, feature=...)` — one per service module; tags every line with `feature` so logs can be filtered per bounded context (`auth`, `admin`, `service_template`, ...).
-- `@operation_log("verb_noun", feature=...)` — put on public service methods. Logs start / complete (+ `duration_ms`) / failed (+ `error`, `error_type`, `exc_info`), sync and async both supported. Use `operation_logger(...)` as a context manager for non-method blocks (worker jobs, scripts).
-- `bind_log_context(**kwargs)` — attach extra fields (e.g. `user_id`) to every log line for the rest of the request/task; call it from an auth dependency or worker entrypoint.
-
-**Do not log** passwords, tokens, raw request/response bodies, or unmasked PII — IDs and metadata only. Use `logger.error(...)`, never `print()`.
-
-Workers/CLI entrypoints that share app code should call `setup_logging()` once at start and use the same loggers/decorator (no HTTP middleware needed outside a request).
-
-Tests live in `tests/log/`, mirroring `src/log/`.
-
----
-
-## Adding a new service
-
-Follow these five steps to wire up a new domain (example: `product`).
-
-### Step 1 — Copy the service template
-
-```bash
-cp -r src/service_template src/product
-```
-
-### Step 2 — Rename everything
-
-Inside `src/product/`, replace all `service_template` / `ServiceTemplate` / `example` / `Example` occurrences with your domain name. Files to update:
-
-- `config.py` — rename `ServiceConfig` → `ProductConfig`, `get_service_config` → `get_product_config`
-- `container.py` — rename `ServiceContainer` → `ProductContainer`; update `db_url("service_template")` → `db_url("product")`; update the wiring module path
-- `dal.py` — rename `ServiceDal` → `ProductDal`; update model imports
-- `service.py` — rename `ServiceLayer` → `ProductService`; update imports
-- `routes.py` — rename tag, update `Provide["service_template.service"]` → `Provide["product.service"]`
-- `models/example.py` — rename `ExampleModel` to your entity; update `__tablename__`
-- `dto.py` — rename DTOs to match your entity
-- `errors.py` — rename error classes
-- `enums/enum.py` — replace `ExampleStatus` with relevant enums
-- `service.py` — update the `feature="service_template"` values (logger + `@operation_log` calls) to your new service's name, see [Logging](#logging)
-
-### Step 3 — Create the SQL scripts
-
-```bash
-cp sql/template.00.sql sql/product.00.sql
-cp sql/template.01.sql sql/product.01.sql
-```
-
-Edit both files: replace `<service_name>` with `product`.
-
-### Step 4 — Register the container in `src/container.py`
-
-```python
-from src.product.container import ProductContainer
-
-class RootContainer(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(
-        modules=[
-            "src.auth.dependencies",
-            "src.auth.routes",
-            "src.admin.routes",
-            "src.product.routes",       # add this
-        ]
-    )
-
-    db_config = providers.Singleton(get_db_config)
-    auth = providers.Container(AuthContainer, db_config=db_config)
-    admin = providers.Container(AdminContainer)
-
-    product = providers.Container(               # add this
-        ProductContainer,
-        db_config=db_config,
-    )
-```
-
-### Step 5 — Register the router in `src/main.py`
-
-```python
-from src.product.routes import router as product_router
-
-app.include_router(product_router)
-```
-
-And connect the DB in the lifespan:
-
-```python
-async def lifespan(app):
-    await container.product.db().connect()
-    yield
-    await container.product.db().disconnect()
-```
-
-### Step 6 — Reset and restart
-
-```bash
-docker compose down && rm -rf .data/ && docker compose up -d
-uvicorn src.main:app --reload
-```
-
----
-
-## Testing
-
-Tests use **pytest** + **pytest-asyncio** (all tests run in `auto` asyncio mode).
-
-```bash
-# Install dependencies (if not already done)
-pip install -r requirements.txt
-
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run a specific module
-pytest tests/auth/
-```
-
-The test suite covers:
-- `tests/auth/` — `AuthService` (shared-secret + DB-backed admin credential validation, default-admin seeding), with `AuthDal` stubbed via `AsyncMock`
-- `tests/admin/` — `AdminService`
-- `tests/common/` — `PaginatedResponse`, `@paginate` decorator, `utcnow()`
-- `tests/log/` — JSON formatter, request-id/context propagation, feature logger, `@operation_log`, `RequestLoggingMiddleware`
-
-Domain-specific tests go in `tests/<service_name>/`. Use `AsyncMock` from the standard library to stub the DAL — no database connection required.
-
----
-
-## Docker
-
-### Development (database only)
-
-```bash
-docker compose up -d        # start DB
-docker compose down         # stop DB
-docker compose logs -f db   # stream logs
-```
-
-### Full stack (API + database)
-
-```bash
+```sh
 docker compose up --build
 ```
 
-The `Dockerfile` builds the API image using Python 3.12-slim and runs `uvicorn` on port `8000`.
+Compose starts PostgreSQL, runs Alembic in a one-shot migration service, then starts the API only if migration succeeds. All domains use the same database. `DATABASE_HOST_OVERRIDE=db` selects the Compose hostname without reconstructing the password-bearing URL. No SQL initialization directory is mounted. Persistent PostgreSQL data uses a named volume. Keep the database private and terminate HTTPS at your deployment ingress.
 
-### Switching to PostgreSQL
+## Email/password login (default)
 
-1. In `docker-compose.yml`, comment out the MySQL `db` service and uncomment the PostgreSQL block.
-2. In `.env`, set `DB_DRIVER=postgresql+asyncpg`.
-3. In `requirements.txt`, comment out `aiomysql` and uncomment `asyncpg`.
-4. Update your `sql/*.sql` scripts to use PostgreSQL syntax (the templates include commented-out PG equivalents).
-5. Reset the database: `docker compose down && rm -rf .data/ && docker compose up -d`.
+Set `AUTH_MODE=local` and generate a unique `JWT_SECRET_KEY` (at least 32 characters). Run `alembic upgrade head` to add the local account table. No identity provider is needed.
+
+Create your first administrator explicitly; there is no default account or password:
+
+```sh
+python -m src.auth.manage --email admin@example.com --role SUPERADMIN
+# Or inside the Compose API container:
+docker compose exec api python -m src.auth.manage --email admin@example.com --role SUPERADMIN
+```
+
+The command prompts for a 12–128 character password and confirmation. It also creates ordinary users (`--role USER`) or admins (`--role ADMIN`). Do not put passwords into shell command arguments.
+
+Login accepts JSON:
+
+```sh
+curl http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"your-password"}'
+```
+
+The response contains `access_token` and `token_type: bearer`. Send the token as `Authorization: Bearer <access_token>` for `/api/v1/auth/me` and protected routes. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (30 by default); log in again after expiration. There is no refresh-token endpoint. Client logout discards the token; it remains valid until expiry unless its account is disabled or deleted. Keep the signing secret private; rotating it invalidates all local tokens.
+
+Passwords are hashed with Argon2id; hashing and verification run off the event loop. Email addresses are validated and normalized to lowercase. Every authenticated request reloads the account so disabled accounts and role changes take effect immediately. Public requests cannot choose roles. This baseline has no password-reset/email-verification flows; accounts are created through the management command by default. Configure ingress rate limits and HTTPS before public deployment.
+
+Optional self-registration: set `AUTH_ALLOW_REGISTRATION=true` and POST the same email/password JSON to `/api/v1/auth/register`. It always creates a `USER`; a role field is rejected. Registration is disabled by default. Passwords are never returned in responses.
+
+## Optional OIDC and roles
+
+To delegate identity management later, set `AUTH_MODE=oidc`, `OIDC_ISSUER`, `OIDC_AUDIENCE`, and `OIDC_ROLES_CLAIM`. Local login and registration are disabled in that mode. The two modes deliberately do not accept each other's tokens. Local accounts are not automatically linked to provider identities.
+
+
+In OIDC mode, this backend is a resource server. The identity provider owns login, logout, passwords, MFA, users and role assignment. Local login and registration are disabled; provider identities do not use the local password table. Browser clients use Authorization Code + PKCE through the provider; backend/service clients use a provider-supported flow. Send the resulting **access token** to this API:
+
+```sh
+curl http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Configuration:
+
+- `OIDC_ISSUER`: exact issuer, including any trailing slash, from the provider's discovery document. Discovery uses `<issuer>/.well-known/openid-configuration`.
+- `OIDC_AUDIENCE`: dedicated API resource identifier, distinct from the frontend application's client ID. Configure the provider to include it in access tokens. Do not use ID tokens as API credentials.
+- `OIDC_ROLES_CLAIM`: path to an array of role strings, default `roles`. Keycloak commonly uses `realm_access.roles`; a namespaced claim is also supported as a literal key (see implementation).
+- `OIDC_ALLOW_INSECURE_HTTP`: false by default. Enable only for a local HTTP provider. Containers must reach the issuer at the exact issuer URL; `localhost` inside the API container is not the host machine.
+- `OIDC_JWKS_CACHE_SECONDS`: signing-key cache lifetime (default 300 seconds). Unknown key IDs trigger a JWKS refresh for rotation.
+
+Validation restricts the algorithm to RS256, verifies the signature against provider-discovered JWKS, verifies issuer/audience, and requires `exp`, `iat` and `sub`. Expiration and not-before claims are enforced. Roles come only from verified claims. Missing/invalid credentials return 401 with a Bearer challenge; insufficient roles return 403; provider discovery/network failures return 503. Provider IO and token validation execute outside the event loop. No tokens are logged.
+
+Role checks use exact names and explicit allowed roles, without an implicit role hierarchy. `/api/v1/admin/health` accepts `ADMIN` or `SUPERADMIN`. Assign these roles in your provider, and ensure ordinary users cannot edit their own role claims. In OIDC mode, role changes and revocation take effect as access tokens expire; configure suitably short token lifetimes. Configure rate limits at the ingress, including for authentication/JWKS refresh abuse.
+
+For Keycloak: create a realm, register a public frontend client with PKCE S256 and exact redirect URLs, configure an audience mapper for `fasten-api`, create realm roles `ADMIN`/`SUPERADMIN`, assign them to selected users, and set `OIDC_ROLES_CLAIM=realm_access.roles`. The API does not need the frontend's client secret.
+
+## API
+
+- `GET /health`: public process liveness
+- `GET /ready`: public database readiness (503 if PostgreSQL is unavailable)
+- `POST /api/v1/auth/login`: email/password login in local mode
+- `POST /api/v1/auth/register`: optional local USER registration
+- `GET /api/v1/auth/me`: authenticated subject, issuer and roles
+- `GET /api/v1/admin/health`: administrator role required
+- `/docs`: OpenAPI UI with the standard Bearer authorization scheme; paste an access token
+
+`BACKEND_CORS_ORIGINS` is a JSON array of explicit browser origins; the default permits none. Configure the actual frontend origins. CORS does not replace authentication.
+
+## Database and migrations
+
+`RootContainer.db` owns one engine/session factory per process. Inject it into domain containers; domains do not create their own engines or database credentials. Models share `Base.metadata`, native PostgreSQL UUID/JSONB types and timezone-aware timestamps. The example model is included in the initial migration as a working schema reference; its router remains unregistered until you choose to expose the example feature.
+
+Alembic is the only schema history. Import every persisted model in `src/models.py` so autogeneration sees it.
+
+```sh
+alembic revision --autogenerate -m "Add products"
+# Review the generated migration before applying it.
+alembic upgrade head
+alembic check
+alembic current
+```
+
+Run migrations once per deployment before starting/scaling API workers, never independently in every worker. `alembic downgrade -1` reverses the initial migration by dropping the example table; use downgrades only against disposable environments or after reviewing data-loss implications. Production requires tested backups and a deployment-specific recovery plan.
+
+**Already using the PostgreSQL/OIDC revision?** Run `alembic upgrade head` to add the local user table without resetting the existing database. Set `AUTH_MODE=local`, generate a signing secret, and create accounts through the management command.
+
+**Upgrading an older MySQL installation:** this is a breaking baseline for a fresh PostgreSQL database. It does not convert previous MySQL/per-service databases, passwords or admin records. Back up existing data, migrate domain data separately with explicit UUID/timezone conversion, and recreate local accounts with the management command (or provision identities at your optional provider). Associate future user-owned records with the verified `(issuer, subject)` pair, not usernames or email. Do not stamp an existing schema at `head` without reconciling it against the migration. Old SQL files and custom authentication headers have been removed.
+
+## Adding a domain
+
+Copy `src/service_template`, rename its model/service/container/routes, and register persisted models in `src/models.py`. Register the container with `db=db` in `RootContainer`, add its route module to root wiring, then include its router in `create_app`. Reuse `get_current_user` for authenticated routes or `Depends(require_roles("ADMIN", "SUPERADMIN"))` for privileged routes. The copyable template currently uses authenticated access; decide the role policy for writes before exposing it.
+
+The normal flow is routes → services → DAL → shared database. DAL methods own short transactions. Use native `Uuid`, `JSONB` and `DateTime(timezone=True)` consistently. Create and review an Alembic revision for each schema change. No per-service SQL scripts or database lifecycle hooks are needed.
+
+## Tests
+
+```sh
+pytest -q
+```
+
+Unit/API tests use generated RSA keys and mocked discovery/JWKS/DAL access. The PostgreSQL integration test is skipped unless `TEST_DATABASE_URL` points to a **dedicated disposable database**:
+
+```sh
+TEST_DATABASE_URL=postgresql+asyncpg://fasten:password@localhost:5432/fasten_test pytest -q
+```
+
+That test upgrades from the baseline, checks metadata drift, exercises shared-container CRUD, downgrades and re-upgrades. CI runs on Python 3.12 with a real PostgreSQL service. The lock file fixes dependency resolution; update it deliberately with `uv pip compile requirements.txt --python-version 3.12 --universal -o requirements.lock` and rerun the suite.
+
+## Logging
+
+JSON logs include request IDs, feature tags and operation durations. `src.log` provides `get_feature_logger`, `operation_log`, and contextual fields. SQL parameters are hidden in engine errors. Do not log tokens, Authorization headers, credentials or raw request bodies. Settings live in `.env` locally and should come from your deployment secret store in production; `.dockerignore` excludes local environment files from images.
