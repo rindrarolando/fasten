@@ -1,11 +1,11 @@
 # Fasten
 
-Async FastAPI backend with one PostgreSQL database, Alembic migrations, OIDC access-token authentication and role-based authorization. Inspired by the [FastAPI full-stack template](https://github.com/fastapi/full-stack-fastapi-template), retaining this project's async SQLAlchemy and dependency-injector service layers.
+Async FastAPI backend with one PostgreSQL database, Alembic migrations, built-in email/password login, JWT access tokens and role-based authorization (with optional OIDC). Inspired by the [FastAPI full-stack template](https://github.com/fastapi/full-stack-fastapi-template), retaining this project's async SQLAlchemy and dependency-injector service layers.
 
 ## Requirements and setup
 
 - Python 3.12+, PostgreSQL 17 (or Docker Compose)
-- An OIDC provider that issues RS256-signed JWT access tokens with an API audience (Keycloak, Auth0, etc.)
+- No external identity provider is needed for the default email/password mode.
 
 ```sh
 python3 -m venv .venv
@@ -14,7 +14,7 @@ pip install -r requirements.lock
 cp .env.example .env
 ```
 
-Edit `.env`: choose a strong PostgreSQL password, update `DATABASE_URL` to match, and configure your provider. Percent-encode special characters in the URL password (`@` becomes `%40`). PostgreSQL's `POSTGRES_PASSWORD` remains the raw password. `DATABASE_URL` is required; there are no built-in database or administrator credentials.
+Edit `.env`: choose a strong PostgreSQL password, update `DATABASE_URL` to match, and set `JWT_SECRET_KEY` to a random value generated with `openssl rand -hex 32`. Percent-encode special characters in the URL password (`@` becomes `%40`). PostgreSQL's `POSTGRES_PASSWORD` remains the raw password. `DATABASE_URL` is required; there are no built-in database or administrator credentials.
 
 For a host-run API:
 
@@ -32,9 +32,40 @@ docker compose up --build
 
 Compose starts PostgreSQL, runs Alembic in a one-shot migration service, then starts the API only if migration succeeds. All domains use the same database. `DATABASE_HOST_OVERRIDE=db` selects the Compose hostname without reconstructing the password-bearing URL. No SQL initialization directory is mounted. Persistent PostgreSQL data uses a named volume. Keep the database private and terminate HTTPS at your deployment ingress.
 
-## OIDC and roles
+## Email/password login (default)
 
-This backend is a resource server. The identity provider owns login, logout, passwords, MFA, users and role assignment. There is no local login endpoint, password database, bootstrap admin or user-management API. Browser clients use Authorization Code + PKCE through the provider; backend/service clients use a provider-supported flow. Send the resulting **access token** to this API:
+Set `AUTH_MODE=local` and generate a unique `JWT_SECRET_KEY` (at least 32 characters). Run `alembic upgrade head` to add the local account table. No identity provider is needed.
+
+Create your first administrator explicitly; there is no default account or password:
+
+```sh
+python -m src.auth.manage --email admin@example.com --role SUPERADMIN
+# Or inside the Compose API container:
+docker compose exec api python -m src.auth.manage --email admin@example.com --role SUPERADMIN
+```
+
+The command prompts for a 12–128 character password and confirmation. It also creates ordinary users (`--role USER`) or admins (`--role ADMIN`). Do not put passwords into shell command arguments.
+
+Login accepts JSON:
+
+```sh
+curl http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"your-password"}'
+```
+
+The response contains `access_token` and `token_type: bearer`. Send the token as `Authorization: Bearer <access_token>` for `/api/v1/auth/me` and protected routes. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (30 by default); log in again after expiration. There is no refresh-token endpoint. Client logout discards the token; it remains valid until expiry unless its account is disabled or deleted. Keep the signing secret private; rotating it invalidates all local tokens.
+
+Passwords are hashed with Argon2id; hashing and verification run off the event loop. Email addresses are validated and normalized to lowercase. Every authenticated request reloads the account so disabled accounts and role changes take effect immediately. Public requests cannot choose roles. This baseline has no password-reset/email-verification flows; accounts are created through the management command by default. Configure ingress rate limits and HTTPS before public deployment.
+
+Optional self-registration: set `AUTH_ALLOW_REGISTRATION=true` and POST the same email/password JSON to `/api/v1/auth/register`. It always creates a `USER`; a role field is rejected. Registration is disabled by default. Passwords are never returned in responses.
+
+## Optional OIDC and roles
+
+To delegate identity management later, set `AUTH_MODE=oidc`, `OIDC_ISSUER`, `OIDC_AUDIENCE`, and `OIDC_ROLES_CLAIM`. Local login and registration are disabled in that mode. The two modes deliberately do not accept each other's tokens. Local accounts are not automatically linked to provider identities.
+
+
+In OIDC mode, this backend is a resource server. The identity provider owns login, logout, passwords, MFA, users and role assignment. Local login and registration are disabled; provider identities do not use the local password table. Browser clients use Authorization Code + PKCE through the provider; backend/service clients use a provider-supported flow. Send the resulting **access token** to this API:
 
 ```sh
 curl http://localhost:8000/api/v1/auth/me \
@@ -51,7 +82,7 @@ Configuration:
 
 Validation restricts the algorithm to RS256, verifies the signature against provider-discovered JWKS, verifies issuer/audience, and requires `exp`, `iat` and `sub`. Expiration and not-before claims are enforced. Roles come only from verified claims. Missing/invalid credentials return 401 with a Bearer challenge; insufficient roles return 403; provider discovery/network failures return 503. Provider IO and token validation execute outside the event loop. No tokens are logged.
 
-Role checks use exact names and explicit allowed roles, without an implicit role hierarchy. `/api/v1/admin/health` accepts `ADMIN` or `SUPERADMIN`. Assign these roles in your provider, and ensure ordinary users cannot edit their own role claims. Role changes and revocation take effect as access tokens expire; configure suitably short token lifetimes. Configure rate limits at the ingress, including for authentication/JWKS refresh abuse.
+Role checks use exact names and explicit allowed roles, without an implicit role hierarchy. `/api/v1/admin/health` accepts `ADMIN` or `SUPERADMIN`. Assign these roles in your provider, and ensure ordinary users cannot edit their own role claims. In OIDC mode, role changes and revocation take effect as access tokens expire; configure suitably short token lifetimes. Configure rate limits at the ingress, including for authentication/JWKS refresh abuse.
 
 For Keycloak: create a realm, register a public frontend client with PKCE S256 and exact redirect URLs, configure an audience mapper for `fasten-api`, create realm roles `ADMIN`/`SUPERADMIN`, assign them to selected users, and set `OIDC_ROLES_CLAIM=realm_access.roles`. The API does not need the frontend's client secret.
 
@@ -59,6 +90,8 @@ For Keycloak: create a realm, register a public frontend client with PKCE S256 a
 
 - `GET /health`: public process liveness
 - `GET /ready`: public database readiness (503 if PostgreSQL is unavailable)
+- `POST /api/v1/auth/login`: email/password login in local mode
+- `POST /api/v1/auth/register`: optional local USER registration
 - `GET /api/v1/auth/me`: authenticated subject, issuer and roles
 - `GET /api/v1/admin/health`: administrator role required
 - `/docs`: OpenAPI UI with the standard Bearer authorization scheme; paste an access token
@@ -81,7 +114,9 @@ alembic current
 
 Run migrations once per deployment before starting/scaling API workers, never independently in every worker. `alembic downgrade -1` reverses the initial migration by dropping the example table; use downgrades only against disposable environments or after reviewing data-loss implications. Production requires tested backups and a deployment-specific recovery plan.
 
-**Upgrading an existing installation:** this is a breaking baseline for a fresh PostgreSQL database. It does not convert previous MySQL/per-service databases, passwords or admin records. Back up existing data, migrate domain data separately with explicit UUID/timezone conversion, and provision identities/roles at the provider. Associate future user-owned records with the verified `(issuer, subject)` pair, not usernames or email. Do not stamp an existing schema at `head` without reconciling it against the migration. Old SQL files and custom authentication headers have been removed.
+**Already using the PostgreSQL/OIDC revision?** Run `alembic upgrade head` to add the local user table without resetting the existing database. Set `AUTH_MODE=local`, generate a signing secret, and create accounts through the management command.
+
+**Upgrading an older MySQL installation:** this is a breaking baseline for a fresh PostgreSQL database. It does not convert previous MySQL/per-service databases, passwords or admin records. Back up existing data, migrate domain data separately with explicit UUID/timezone conversion, and recreate local accounts with the management command (or provision identities at your optional provider). Associate future user-owned records with the verified `(issuer, subject)` pair, not usernames or email. Do not stamp an existing schema at `head` without reconciling it against the migration. Old SQL files and custom authentication headers have been removed.
 
 ## Adding a domain
 

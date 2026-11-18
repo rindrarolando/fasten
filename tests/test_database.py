@@ -38,6 +38,41 @@ async def test_migrations_and_shared_database():
         ).database_url
     )
     try:
+        from fastapi import HTTPException
+        from sqlalchemy import update
+
+        from src.auth.config import AuthConfig
+        from src.auth.dal import UserDal
+        from src.auth.dto import RegisterRequest
+        from src.auth.local import LocalAuthService
+        from src.auth.models import User
+
+        auth = LocalAuthService(
+            AuthConfig(
+                AUTH_MODE="local",
+                JWT_SECRET_KEY="integration-test-secret-at-least-32-characters",
+            ),
+            UserDal(db),
+        )
+        body = RegisterRequest(
+            email="integration@example.com", password="strong-test-password"
+        )
+        principal = await auth.create_user(body)
+        token = (await auth.login(body)).access_token
+        assert (await auth.authenticate(token)).roles == ["USER"]
+        with pytest.raises(HTTPException) as conflict:
+            await auth.create_user(body)
+        assert conflict.value.status_code == 409
+        async with db.session() as session:
+            await session.execute(
+                update(User)
+                .where(User.uid == uuid.UUID(principal.subject))
+                .values(is_active=False)
+            )
+            await session.commit()
+        with pytest.raises(HTTPException) as inactive:
+            await auth.authenticate(token)
+        assert inactive.value.status_code == 401
         domain = ServiceContainer(db=db)
         assert domain.db() is db
         uid = uuid.uuid4()

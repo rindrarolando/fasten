@@ -4,3 +4,5 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://fasten:test@localhost:5432/fasten_test")
 os.environ.setdefault("OIDC_ISSUER", "https://issuer.test")
 os.environ.setdefault("OIDC_AUDIENCE", "fasten-api")
+
+os.environ.setdefault("JWT_SECRET_KEY", "test-only-signing-key-at-least-32-characters")

@@ -11,7 +11,7 @@ from src.log import RequestLoggingMiddleware, get_logging_config, setup_logging
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     container = app.container
-    # Fail closed on missing OIDC configuration, without making provider network calls.
+    # Fail closed on missing authentication configuration, without making provider network calls.
     container.auth.config()
     db = container.db()
     try:

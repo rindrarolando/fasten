@@ -31,7 +31,11 @@ def provider(monkeypatch):
     monkeypatch.setattr(httpx, "get", discovery)
     monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", lambda self: {"keys": [public]})
     service = AuthService(
-        AuthConfig(OIDC_ISSUER="https://issuer.test", OIDC_AUDIENCE="fasten-api")
+        AuthConfig(
+            AUTH_MODE="oidc",
+            OIDC_ISSUER="https://issuer.test",
+            OIDC_AUDIENCE="fasten-api",
+        )
     )
 
     def token(**changes):
@@ -146,7 +150,9 @@ async def test_discovery_issuer_must_match(provider):
 
 def test_https_required():
     with pytest.raises(ValueError):
-        AuthConfig(OIDC_ISSUER="http://issuer.test", OIDC_AUDIENCE="api")
+        AuthConfig(
+            AUTH_MODE="oidc", OIDC_ISSUER="http://issuer.test", OIDC_AUDIENCE="api"
+        )
 
 
 async def test_rotated_signing_key_is_refreshed(provider, monkeypatch):

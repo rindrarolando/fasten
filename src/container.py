@@ -7,14 +7,16 @@ from src.config import get_settings
 
 
 class RootContainer(containers.DeclarativeContainer):
-    wiring_config = containers.WiringConfiguration(modules=["src.auth.dependencies"])
+    wiring_config = containers.WiringConfiguration(
+        modules=["src.auth.dependencies", "src.auth.routes"]
+    )
     settings = providers.Singleton(get_settings)
     db = providers.Singleton(
         AsyncDatabase,
         url=settings.provided.database_url,
         echo=settings.provided.DB_ECHO,
     )
-    auth = providers.Container(AuthContainer)
+    auth = providers.Container(AuthContainer, db=db)
     admin = providers.Container(AdminContainer)
     # New domains receive this same database:
     # product = providers.Container(ProductContainer, db=db)

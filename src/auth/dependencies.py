@@ -7,9 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from src.auth.dto import Principal
 from src.auth.service import AuthService
 
-bearer = HTTPBearer(
-    auto_error=False, description="OIDC access token for this API's audience"
-)
+bearer = HTTPBearer(auto_error=False, description="JWT access token")
 
 
 @inject
