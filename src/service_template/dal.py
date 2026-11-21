@@ -45,15 +45,28 @@ class ServiceDal:
             )
             return list(result.scalars().all()), total
 
-    async def update(self, obj_id: int, data: dict[str, Any]) -> ExampleModel | None:
+    async def update(self, uid: uuid.UUID, data: dict[str, Any]) -> ExampleModel | None:
         async with self._db.session() as session:
-            await session.execute(
-                update(ExampleModel).where(ExampleModel.id == obj_id).values(**data)
+            # An empty PATCH is a read-only no-op; do not change updated_at.
+            if not data:
+                return await session.scalar(
+                    select(ExampleModel).where(ExampleModel.uid == uid)
+                )
+            obj = await session.scalar(
+                update(ExampleModel)
+                .where(ExampleModel.uid == uid)
+                .values(**data)
+                .returning(ExampleModel)
             )
             await session.commit()
-            return await session.get(ExampleModel, obj_id)
+            return obj
 
-    async def delete(self, obj_id: int) -> None:
+    async def delete(self, uid: uuid.UUID) -> bool:
         async with self._db.session() as session:
-            await session.execute(delete(ExampleModel).where(ExampleModel.id == obj_id))
+            deleted = await session.scalar(
+                delete(ExampleModel)
+                .where(ExampleModel.uid == uid)
+                .returning(ExampleModel.uid)
+            )
             await session.commit()
+            return deleted is not None

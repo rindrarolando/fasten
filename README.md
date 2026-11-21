@@ -124,6 +124,12 @@ Copy `src/service_template`, rename its model/service/container/routes, and regi
 
 The normal flow is routes → services → DAL → shared database. DAL methods own short transactions. Use native `Uuid`, `JSONB` and `DateTime(timezone=True)` consistently. Create and review an Alembic revision for each schema change. No per-service SQL scripts or database lifecycle hooks are needed.
 
+The template limits names to 255 characters. PATCH changes only supplied fields:
+`{"meta": null}` clears metadata, while omitted fields remain unchanged. A null
+name is rejected. An empty PATCH returns the current record without changing
+`updated_at`. Updates and deletes target the UUID atomically and return 404 when
+the record no longer exists, including when another request has deleted it.
+
 ## Tests
 
 ```sh
