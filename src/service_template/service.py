@@ -50,16 +50,13 @@ class ServiceLayer:
     async def update(
         self, uid: uuid.UUID, body: ExampleModelUpdate
     ) -> ExampleModelRead:
-        obj = await self._dal.get_by_uid(uid)
-        if obj is None:
+        updates = body.model_dump(exclude_unset=True)
+        updated = await self._dal.update(uid, updates)
+        if updated is None:
             raise ExampleModelNotFound(str(uid))
-        updates = body.model_dump(exclude_none=True)
-        updated = await self._dal.update(obj.id, updates)
         return ExampleModelRead.model_validate(updated)
 
     @operation_log("delete_example", feature="service_template")
     async def delete(self, uid: uuid.UUID) -> None:
-        obj = await self._dal.get_by_uid(uid)
-        if obj is None:
+        if not await self._dal.delete(uid):
             raise ExampleModelNotFound(str(uid))
-        await self._dal.delete(obj.id)

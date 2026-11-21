@@ -1,5 +1,6 @@
 """Real PostgreSQL integration test, enabled by TEST_DATABASE_URL (dedicated disposable DB)."""
 
+import asyncio
 import os
 import subprocess
 import uuid
@@ -46,6 +47,8 @@ async def test_migrations_and_shared_database():
         from src.auth.dto import RegisterRequest
         from src.auth.local import LocalAuthService
         from src.auth.models import User
+        from src.service_template.dto import ExampleModelUpdate
+        from src.service_template.errors import ExampleModelNotFound
 
         auth = LocalAuthService(
             AuthConfig(
@@ -81,15 +84,43 @@ async def test_migrations_and_shared_database():
         )
         assert created.uid == uid
         assert created.created_at.tzinfo is not None
-        updated = await domain.dal().update(created.id, {"name": "updated"})
+        updated = await domain.service().update(uid, ExampleModelUpdate(name="updated"))
         assert updated.name == "updated"
         assert updated.updated_at.tzinfo is not None
+        assert updated.meta == {"test": True}
+        unchanged = await domain.service().update(uid, ExampleModelUpdate())
+        assert unchanged.updated_at == updated.updated_at
+        cleared = await domain.service().update(uid, ExampleModelUpdate(meta=None))
+        assert cleared.meta is None
+        assert cleared.name == "updated"
+        assert (await domain.dal().get_by_uid(uid)).meta is None
         async with db.engine.connect() as connection:
             diff = await connection.run_sync(
                 lambda c: compare_metadata(MigrationContext.configure(c), Base.metadata)
             )
         assert diff == []
-        await domain.dal().delete(created.id)
+        await domain.service().delete(uid)
+        assert await domain.dal().get_by_uid(uid) is None
+        for patch in [ExampleModelUpdate(), ExampleModelUpdate(name="deleted")]:
+            with pytest.raises(ExampleModelNotFound):
+                await domain.service().update(uid, patch)
+        with pytest.raises(ExampleModelNotFound):
+            await domain.service().delete(uid)
+
+        # Race independent sessions: the update either succeeds before deletion
+        # or returns 404. It must never try to validate a missing RETURNING row.
+        await domain.dal().create({"uid": uid, "name": "concurrent"})
+        results = await asyncio.gather(
+            domain.service().update(uid, ExampleModelUpdate(name="racing")),
+            domain.service().delete(uid),
+            return_exceptions=True,
+        )
+        patched, deleted = results
+        if isinstance(patched, Exception):
+            assert isinstance(patched, ExampleModelNotFound)
+        else:
+            assert patched.name == "racing"
+        assert deleted is None
         assert await domain.dal().get_by_uid(uid) is None
     finally:
         await db.disconnect()
